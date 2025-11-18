@@ -2,98 +2,192 @@
 
 ## Project Overview
 
-This is a React 19 web application for exploring GitHub repositories, built with Create React App. It uses React Router v7 for navigation and styled-components for styling.
+GitHub repository explorer built with React 19 + Create React App. Users can search, save, and manage GitHub repositories with optional personal access token authentication.
 
-**Key Technologies:**
-
-- React 19 & React Router v7 (supports nested routes via `<Switch>`)
-- styled-components for CSS-in-JS
-- Create React App (CRA) build setup
+**Stack:** React 19, React Router v7, styled-components, Axios, React Icons
 
 ## Architecture
 
-### Core Structure
+### Data Flow & State Management
 
-- **Entry Point**: `src/App.js` wraps the app with `<Routes />` component
-- **Routing**: `src/routes.js` defines URL mappings using React Router v7's `<BrowserRouter>`, `<Switch>`, and `<Route>`
-- **Pages**: Located in `src/pages/` with folder-based organization (e.g., `Main`, `Repositorio`)
-- **Styles**: Global CSS in `src/styles/global.js` + component-scoped styled-components
+**localStorage-based persistence** (no backend):
+- `repos` - Array of saved repositories: `[{ name: "owner/repo" }]`
+- `github_token` - Optional GitHub personal access token
 
-### Current Routes
+**API Layer** (`src/services/api.js`):
+- Axios instance configured for GitHub API v3
+- `setGithubToken(token)` - Dynamically adds/removes Authorization header
+- Auto-initializes token from localStorage on module load
+
+**Component State Pattern** (see `src/pages/Main/index.js`):
+```javascript
+// Load from localStorage on mount
+useEffect(() => {
+  const repoStorage = localStorage.getItem("repos");
+  if (repoStorage) setRepositorios(JSON.parse(repoStorage));
+}, []);
+
+// Persist to localStorage on change
+useEffect(() => {
+  localStorage.setItem("repos", JSON.stringify(repositorios));
+}, [repositorios]);
+```
+
+### Routing Structure
 
 ```
-GET  /                      → Main page (search/list repos)
-GET  /repositorio/:repositorio → Repository detail page
+src/index.js → src/App.js → src/routes.js
+                 ↓
+          GlobalStyle applied
+                 ↓
+          <BrowserRouter>
+            / → Main (list/search repos)
+            /repositorio/:repositorio → Repositorio (details)
 ```
 
-### Page Pattern
+**Route param format:** `/repositorio/facebook/react` (owner/repo)
 
-Each page is a function component in its own folder:
+### Page Architecture Pattern
 
+**Standard page structure:**
 ```
 src/pages/PageName/
-├── index.js          (main component, imports from styles.js)
-└── styles.js         (styled-components exports)
+├── index.js   - Functional component with hooks
+└── styles.js  - Exported styled-components
 ```
 
-Pages like `Main` import styled components from `./styles` (see `src/pages/Main/index.js` importing `Title` from `./styles`). The `Repositorio` page is incomplete—it currently returns plain JSX and should follow the styled-components pattern.
+**Import pattern:**
+```javascript
+import { Container, Form, SubmitButton } from "./styles";
+```
 
-## Styling Conventions
+## Styling System
 
-**Global Styles** (`src/styles/global.js`):
+**Global reset** (`src/styles/global.js`):
+- Dark background: `#0D2636`
+- Base font: 14px Arial/Helvetica
+- Box-sizing, margin/padding reset
 
-- Uses `createGlobalStyle` for reset CSS and body/button defaults
-- Dark theme base: `background: #0D2636`
-- Font size: 14px
+**Component styles** (example from `Main/styles.js`):
+```javascript
+// Keyframe animations for loading states
+const animate = keyframes`from { transform: rotate(0deg); } to { transform: rotate(360deg); }`;
 
-**Component Styles** (e.g., `src/pages/Main/styles.js`):
+// Conditional styling with props
+export const SubmitButton = styled.button.attrs(props => ({
+  disabled: props.loading
+}))`
+  ${props => props.loading && css`
+    svg { animation: ${animate} 2s linear infinite; }
+  `}
+`;
 
-- Export named styled components (e.g., `export const Title = styled.h1...`)
-- Use nested selectors for child elements (e.g., `span { color: blue; }`)
-- Colors are hardcoded (Red: `#FF0000`, Blue: `blue`)
+// Error state via props
+export const Form = styled.form`
+  input {
+    border: 1px solid ${props => props.error ? "#FF0000" : "#eee"};
+  }
+`;
+```
 
-When adding new pages, create a `styles.js` file exporting styled components and import them in the page's `index.js`.
+**Color palette:**
+- Primary: `#0D2636` (dark blue)
+- Error: `#FF0000`, `#c62828`, `#ffebee` (red variants)
+- Neutral: `#eee`, `#f5f5f5`, `#666`
+
+## Critical Patterns
+
+### Form Submission with API Calls
+
+Pattern from `Main/index.js` - wrap async logic in sync handler:
+```javascript
+const handleSubmit = useCallback((e) => {
+  e.preventDefault();
+  
+  async function submit() {
+    setLoading(true);
+    setAlert(null);
+    try {
+      const response = await api.get(`repos/${newRepo}`);
+      // Duplicate check
+      const hasRepo = repositorios.find(repo => repo.name === newRepo);
+      if (hasRepo) throw new Error("Repositorio Duplicado");
+      // Add to state
+      setRepositorios([...repositorios, { name: response.data.full_name }]);
+      setNewRepo("");
+    } catch (error) {
+      setAlert(error.message || "Erro ao buscar repositório...");
+    } finally {
+      setLoading(false);
+    }
+  }
+  
+  submit();
+}, [newRepo, repositorios]);
+```
+
+### Icon Integration (react-icons)
+
+```javascript
+import { FaGithub, FaSpinner, FaTrash } from "react-icons/fa";
+
+// Loading state toggle
+{loading ? <FaSpinner color="#FFF" size={14} /> : <FaPlus color="#FFF" size={14} />}
+```
+
+### Button Attributes Pattern
+
+Use `styled.button.attrs()` for dynamic HTML attributes:
+```javascript
+export const SubmitButton = styled.button.attrs(props => ({
+  type: "submit",
+  disabled: props.loading
+}))`...`;
+```
 
 ## Development Workflow
 
-**Commands:**
+**Local development:**
+```bash
+npm start  # localhost:3000 with hot reload
+```
 
-- `npm start` – Dev server on localhost:3000 with hot reload
-- `npm test` – Jest runner in watch mode
-- `npm run build` – Optimize production bundle
-- `npm run eject` – ⚠️ One-way: exposes CRA config (avoid unless necessary)
+**GitHub token setup** (optional, increases rate limits):
+1. Generate at https://github.com/settings/tokens
+2. Add via UI or localStorage: `localStorage.setItem("github_token", "ghp_...")`
+3. Token persists across sessions
 
-**Key Files to Reference:**
+**Testing:**
+```bash
+npm test  # Jest watch mode
+```
 
-- `package.json` – Dependencies, scripts, ESLint config (extends react-app)
-- `public/index.html` – Single root div with id="root"
+## Known Implementation Details
 
-## Common Patterns
+**Incomplete features:**
+- `src/pages/Repositorio/index.js` - Placeholder only, no API call or styling
+- No error boundary components
+- No route-based code splitting
 
-1. **Adding a New Page:**
+**Dependencies notes:**
+- React 19 + React Router 7 use modern `<Routes>` API (not `<Switch>`)
+- `styled-components` v6 requires explicit `attrs()` for dynamic props
+- Axios v1.13+ configured with GitHub API v3 headers
 
-   - Create `src/pages/PageName/index.js` with a functional component
-   - Create `src/pages/PageName/styles.js` with styled-component exports
-   - Add route in `src/routes.js` inside the `<Switch>`
+**Navigation:**
+- Use `<a href="/repositorio/...">` not `<Link>` (see `Main/index.js` line 167)
+- Full page reload on navigation (could optimize with React Router `<Link>`)
 
-2. **React Router URL Params:**
+## Adding Features
 
-   - Use `:paramName` in route path (e.g., `/repositorio/:repositorio`)
-   - Access via `useParams()` hook in the page component
+**New page checklist:**
+1. Create `src/pages/NewPage/index.js` with functional component
+2. Create `src/pages/NewPage/styles.js` with styled exports
+3. Add route in `src/routes.js`: `<Route path="/new" element={<NewPage />} />`
+4. Follow localStorage pattern if persistence needed
+5. Use `useCallback` for event handlers that depend on state
 
-3. **Styled-Components Usage:**
-   - Always import styled from `'styled-components'`
-   - Export components as named exports for easy reuse
-   - Follow the pattern: `export const ComponentName = styled.element\`...`
-
-## Known Issues / Incomplete Features
-
-- `Repositorio` page (`src/pages/Repositorio/index.js`) lacks styling—should use styled-components
-- `index.js` entry file is empty (CRA typically has ReactDOM render call there)
-- No error boundaries or loading states implemented
-
-## Testing & Linting
-
-- ESLint config extends `react-app` (standard CRA ruleset)
-- Testing library: `@testing-library/react` v16.3.0
-- Run tests with `npm test` in watch mode
+**API calls:**
+- Always use `api` from `src/services/api.js` (pre-configured)
+- Handle loading/error states in UI
+- Check for duplicates/validation before setState
